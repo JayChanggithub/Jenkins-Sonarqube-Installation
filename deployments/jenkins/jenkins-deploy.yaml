@@ -1,0 +1,184 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins2
+  namespace: kube-ops
+
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: jenkins2
+rules:
+  - apiGroups: ["extensions", "apps"]
+    resources: ["deployments"]
+    verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create","delete","get","list","patch","update","watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create","delete","get","list","patch","update","watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get","list","watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jenkins-data
+  namespace: kube-ops
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  glusterfs:
+    endpoints: "gluster-cluster"
+    path: "jenkins_volume"
+    readOnly: false
+
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: jenkins-data
+  namespace: kube-ops
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins2
+  namespace: kube-ops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: jenkins2
+subjects:
+  - kind: ServiceAccount
+    name: jenkins2
+    namespace: kube-ops
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins2
+  namespace: kube-ops
+spec:
+  selector:
+    matchLabels:
+      app: jenkins2
+  template:
+    metadata:
+      labels:
+        app: jenkins2
+    spec:
+      terminationGracePeriodSeconds: 10
+      serviceAccount: jenkins2
+      containers:
+      - name: jenkins
+        image: registry.ipt-gitlab:8081/sit-develop-tool/tool-jenkins-setup:__VERSION__
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: web
+          protocol: TCP
+        - containerPort: 50000
+          name: agent
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /login
+            port: 8080
+          initialDelaySeconds: 60
+          timeoutSeconds: 5
+          failureThreshold: 12
+        readinessProbe:
+          httpGet:
+            path: /login
+            port: 8080
+          initialDelaySeconds: 60
+          timeoutSeconds: 5
+          failureThreshold: 12
+        volumeMounts:
+        - name: jenkinshome
+          subPath: jenkins2
+          mountPath: /var/jenkins_home
+        - name: tz-config
+          mountPath: /etc/localtime
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+        - name: docker-cmd
+          mountPath: /usr/bin/docker
+      volumes:
+      - name: tz-config
+        hostPath:
+          path: /usr/share/zoneinfo/Asia/Shanghai
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+      - name: docker-cmd
+        hostPath:
+          path: /usr/bin/docker
+      - name: jenkinshome
+        persistentVolumeClaim:
+          claimName: jenkins-data
+      imagePullSecrets:
+      - name: gitlab-registry
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins2
+  namespace: kube-ops
+  labels:
+    app: jenkins2
+spec:
+  selector:
+    app: jenkins2
+  type: NodePort
+  ports:
+  - name: web
+    port: 8080
+    targetPort: web
+  - name: agent
+    port: 50000
+    targetPort: agent
+
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: jenkins2-ingress
+  namespace: kube-ops
+spec:
+  rules:
+  - host: jenkins2.cloudnative.ies.inventec
+    http:
+      paths:
+      - backend:
+          serviceName: jenkins2
+          servicePort: 8080

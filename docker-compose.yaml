@@ -1,0 +1,21 @@
+version: '2'
+networks:
+  default:
+    external:
+      name: docker-compose-net
+services:
+  ipt-jenkins:
+    image: CI_IMAGE:__VERSION__
+    user: root
+    container_name: ipt-jenkins
+    extra_hosts:
+      - "ipt-gitlab.ies.inventec:10.99.104.242"
+      - "mailrelay-b.ies.inventec:10.99.2.61"
+    ports:
+      - "8080:8080"
+    volumes:
+      - "/etc/localtime:/etc/localtime:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "/srv/jenkins:/var/jenkins_home"
+      - "/usr/bin/docker:/usr/bin/docker"
+    restart: always
